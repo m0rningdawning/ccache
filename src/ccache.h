@@ -11,6 +11,8 @@ struct tests {
 };
 
 size_t get_cache_size(int level);
-uint64_t assess_cache(size_t size, size_t stride, size_t it);
+void flush_cache(size_t l3_size);
+void assess_cache(size_t size, size_t stride, size_t it, uint64_t *cycles,
+                  uint64_t *nanos);
 
 #endif /* CCACHE_H_ */

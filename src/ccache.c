@@ -1,12 +1,11 @@
 #include "ccache.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
 #ifdef __x86_64__
-static __inline uint64_t rdtsc(void) {
+static inline uint64_t rdtsc(void) {
   unsigned hi, lo;
   __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
   return ((uint64_t)hi << 32) | lo;
@@ -42,7 +41,42 @@ size_t get_cache_size(int level) {
   return 0;
 }
 
-uint64_t assess_cache(size_t size, size_t stride, size_t it) {
+void flush_cache(size_t l3_size) {
+  size_t flush_size = l3_size * 2;
+  size_t elements = flush_size / sizeof(size_t);
+  volatile size_t *flush_buf = aligned_alloc(64, flush_size);
+  size_t sum = 0;
+
+  if (!flush_buf) {
+    perror("aligned_alloc");
+    exit(EXIT_FAILURE);
+  }
+
+  // Initialize buffer with a pointer-chasing pattern
+  for (size_t i = 0; i < elements; i++) {
+    ((size_t *)flush_buf)[i] = (i + 97) % elements;
+  }
+
+  // Pointer-chasing access to defeat prefetchers
+  size_t idx = 0;
+  for (size_t i = 0; i < elements; i++) {
+    idx = flush_buf[idx];
+    sum += idx;
+  }
+
+  // Prevent optimizing away
+  if (sum == 0xdeadbeef) puts("Impossible");
+  free((void *)flush_buf);
+}
+
+static inline uint64_t timespec_diff_ns(const struct timespec *start,
+                                        const struct timespec *end) {
+  return (end->tv_sec - start->tv_sec) * 1000000000ULL +
+         (end->tv_nsec - start->tv_nsec);
+}
+
+void assess_cache(size_t size, size_t stride, size_t it, uint64_t *cycles,
+                  uint64_t *nanos) {
   size_t elements = size / sizeof(size_t);
   size_t step = stride / sizeof(size_t);
   size_t *buffer = aligned_alloc(64, size);
@@ -62,22 +96,32 @@ uint64_t assess_cache(size_t size, size_t stride, size_t it) {
     idx = buffer[idx];
   }
 
-  // timed run
-  uint64_t start = rdtsc();
+  flush_cache(get_cache_size(3) ? get_cache_size(3) : 8 * 1024 * 1024);
+
+  // cycles and ns
+  uint64_t start_cycles = rdtsc();
+  struct timespec t_start, t_end;
+  clock_gettime(CLOCK_MONOTONIC, &t_start);
+
   idx = 0;
   for (size_t i = 0; i < it; i++) {
     idx = buffer[idx];
   }
-  uint64_t end = rdtsc();
+
+  clock_gettime(CLOCK_MONOTONIC, &t_end);
+  uint64_t end_cycles = rdtsc();
 
   free(buffer);
-  return (end - start) / it;
+
+  *cycles = (end_cycles - start_cycles) / it;
+  *nanos = timespec_diff_ns(&t_start, &t_end) / it;
 }
 
 int main(void) {
   size_t l1 = get_cache_size(1);
   size_t l2 = get_cache_size(2);
   size_t l3 = get_cache_size(3);
+  size_t it = 10000000;
 
   if (!l1) l1 = 32 * 1024;
   if (!l2) l2 = 256 * 1024;
@@ -85,17 +129,19 @@ int main(void) {
 
   struct tests tests[] = {{"L1", l1, 64}, {"L2", l2, 64}, {"L3", l3, 64}};
 
-  size_t it = 10000000;
-
   printf("Detected cache sizes: L1=%zu KB, L2=%zu KB, L3=%zu KB\n", l1 / 1024,
          l2 / 1024, l3 / 1024);
-  printf("Measuring cache latencies (cycles/access) with %zu iterations each\n",
-         it);
+  printf(
+      "Measuring cache latencies (cycles/access and ns/access) with %zu "
+      "iterations each\n",
+      it);
 
   for (int i = 0; i < 3; i++) {
-    uint64_t lat = assess_cache(tests[i].size, tests[i].stride, it);
-    printf("%-3s cache (%6zu KB): %4llu cycles\n", tests[i].name,
-           tests[i].size / 1024, (unsigned long long)lat);
+    uint64_t lat_cycles, lat_ns;
+    assess_cache(tests[i].size, tests[i].stride, it, &lat_cycles, &lat_ns);
+    printf("%-3s cache (%6zu KB): %4llu cycles, %4llu ns\n", tests[i].name,
+           tests[i].size / 1024, (unsigned long long)lat_cycles,
+           (unsigned long long)lat_ns);
   }
 
   return 0;
