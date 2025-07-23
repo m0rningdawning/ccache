@@ -52,7 +52,7 @@ void flush_cache(size_t l3_size) {
     exit(EXIT_FAILURE);
   }
 
-  // Initialize buffer with a pointer-chasing pattern
+  // Init buffer with a pointer-chasing pattern
   for (size_t i = 0; i < elements; i++) {
     ((size_t *)flush_buf)[i] = (i + 97) % elements;
   }
@@ -85,12 +85,12 @@ void assess_cache(size_t size, size_t stride, size_t it, uint64_t *cycles,
     perror("aligned_alloc");
     exit(EXIT_FAILURE);
   }
-  // pointer-chase list
+  // Pointer-chase list
   for (size_t i = 0; i < elements; i++) {
     buffer[i] = (i + step) % elements;
   }
 
-  // warm-up
+  // Warm-up
   size_t idx = 0;
   for (size_t i = 0; i < elements; i++) {
     idx = buffer[idx];
@@ -98,7 +98,7 @@ void assess_cache(size_t size, size_t stride, size_t it, uint64_t *cycles,
 
   flush_cache(get_cache_size(3) ? get_cache_size(3) : 8 * 1024 * 1024);
 
-  // cycles and ns
+  // Cycles and ns
   uint64_t start_cycles = rdtsc();
   struct timespec t_start, t_end;
   clock_gettime(CLOCK_MONOTONIC, &t_start);
